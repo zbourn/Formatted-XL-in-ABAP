@@ -1,0 +1,714 @@
+*----------------------------------------------------------------------*
+*       CLASS ZCL_FORMATTED_XL  DEFINITIO
+*----------------------------------------------------------------------*
+*
+*----------------------------------------------------------------------*
+CLASS zcl_formatted_xl DEFINITION
+  PUBLIC
+  CREATE PUBLIC .
+
+*"* public components of class ZCL_FORMATTED_XL
+*"* do not include other source files here!!!
+PUBLIC SECTION.
+  TYPE-POOLS abap .
+  TYPE-POOLS slis .
+
+  METHODS format_xl
+    IMPORTING
+      value(lt_head) TYPE lvc_t_head OPTIONAL
+      value(lt_fcat) TYPE lvc_t_fcat
+      value(lt_data) TYPE ANY TABLE
+    CHANGING
+      value(lt_solix) TYPE solix_tab OPTIONAL
+      value(lv_size) TYPE int4 OPTIONAL .
+  METHODS send_email
+    IMPORTING
+      value(lt_head) TYPE lvc_t_head OPTIONAL
+      value(lt_fcat) TYPE lvc_t_fcat
+      value(lt_data) TYPE ANY TABLE
+      value(i_subject) TYPE so_obj_des
+      value(ip_subject) TYPE string OPTIONAL
+      value(i_recipents) TYPE zty_t_email
+      value(i_sender) TYPE ad_smtpadr OPTIONAL
+      value(i_attachment_subject) TYPE so_obj_des OPTIONAL
+    EXPORTING
+      value(e_sent) TYPE sy-subrc .
+ENDCLASS.
+CLASS zcl_formatted_xl IMPLEMENTATION.
+
+METHOD format_xl .
+  TYPES: BEGIN OF xml_line,
+          data(255) TYPE x,
+         END OF xml_line.
+*---Data Declation
+  DATA: l_ixml                TYPE REF TO if_ixml,
+        l_streamfactory       TYPE REF TO if_ixml_stream_factory,
+        l_ostream             TYPE REF TO if_ixml_ostream,
+        l_renderer            TYPE REF TO if_ixml_renderer,
+        l_document            TYPE REF TO if_ixml_document,
+        l_element_root        TYPE REF TO if_ixml_element,
+        ns_attribute          TYPE REF TO if_ixml_attribute,
+        r_element_properties  TYPE REF TO if_ixml_element,
+        r_worksheet           TYPE REF TO if_ixml_element,
+        r_table               TYPE REF TO if_ixml_element,
+        r_column              TYPE REF TO if_ixml_element,
+        r_row                 TYPE REF TO if_ixml_element,
+        r_cell                TYPE REF TO if_ixml_element,
+        r_ncell               TYPE REF TO if_ixml_element,
+        r_data                TYPE REF TO if_ixml_element,
+        lo_tab                TYPE REF TO cl_abap_tabledescr,
+        lo_ref                TYPE REF TO cl_abap_structdescr,
+        l_value               TYPE string,
+        lv_date               TYPE char10,
+        l_date                TYPE char100,
+        r_styles              TYPE REF TO if_ixml_element,
+        r_style               TYPE REF TO if_ixml_element,
+        r_style1              TYPE REF TO if_ixml_element,
+        r_style2              TYPE REF TO if_ixml_element,
+        r_style3              TYPE REF TO if_ixml_element,
+        r_style4              TYPE REF TO if_ixml_element,  "Date1
+        r_style5              TYPE REF TO if_ixml_element,  "Date2
+        r_style6              TYPE REF TO if_ixml_element,  "Time1
+        r_style7              TYPE REF TO if_ixml_element,  "Time2
+        r_style8              TYPE REF TO if_ixml_element,  "Quantity1
+        r_style9              TYPE REF TO if_ixml_element,  "Quantity9
+        lv_value              TYPE string,
+        lv_len                TYPE int4,
+        lv_value1             TYPE string,
+        lv_res                TYPE int4,
+        r_format              TYPE REF TO if_ixml_element,
+        r_border              TYPE REF TO if_ixml_element,
+        l_xml_table           TYPE TABLE OF xml_line,
+        wa_xml                TYPE xml_line,
+        ls_solix              TYPE solix,
+        l_xml_size            TYPE i,                     "#EC NEEDED
+        l_rc                  TYPE i.                     "#EC NEEDED
+
+  FIELD-SYMBOLS: <fs_fcat>    TYPE lvc_s_fcat,
+                 <fs_data>    TYPE ANY,
+                 <fs_comp>    TYPE abap_compdescr,
+                 <fs_head>    TYPE lvc_s_head,
+                 <lv_field>   TYPE ANY.
+* Creating a ixml Factory
+  l_ixml = cl_ixml=>create( ).
+
+* Creating the DOM Object Model
+  l_document = l_ixml->create_document( ).
+
+* Create Root Node 'Workbook'
+  l_element_root  = l_document->create_simple_element( name = 'Workbook'  parent = l_document ).
+  l_element_root->set_attribute( name = 'xmlns'  value = 'urn:schemas-microsoft-com:office:spreadsheet' ).
+
+  ns_attribute = l_document->create_namespace_decl( name = 'ss'  prefix = 'xmlns'  uri = 'urn:schemas-microsoft-com:office:spreadsheet' ).
+  l_element_root->set_attribute_node( EXPORTING new_attr = ns_attribute ).
+
+  ns_attribute = l_document->create_namespace_decl( name = 'x'  prefix = 'xmlns'  uri = 'urn:schemas-microsoft-com:office:excel' ).
+  l_element_root->set_attribute_node( EXPORTING new_attr = ns_attribute ).
+
+* Create node for document properties.
+  r_element_properties = l_document->create_simple_element( name = 'Report'  parent = l_element_root ).
+  l_value = sy-uname.
+  l_document->create_simple_element( name = 'Author'  value = l_value  parent = r_element_properties  ).
+
+* Styles
+  r_styles = l_document->create_simple_element( name = 'Styles'  parent = l_element_root  ).
+
+* Style for Header
+  r_style  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Header' ).
+
+  r_format  = l_document->create_simple_element( name = 'Font'  parent = r_style  ).
+  r_format->set_attribute_ns( name = 'Bold'  prefix = 'ss'  value = '1' ).
+  r_format->set_attribute_ns( name = 'Color'  prefix = 'ss'  value = '#FFFFFF' ).
+
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#92D050' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_format  = l_document->create_simple_element( name = 'Alignment'  parent = r_style  ).
+  r_format->set_attribute_ns( name = 'Vertical'  prefix = 'ss'  value = 'Center' ).
+  r_format->set_attribute_ns( name = 'WrapText'  prefix = 'ss'  value = '1' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+* Style for Header Text
+  r_style2  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style2->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Some' ).
+  r_format  = l_document->create_simple_element( name = 'Font'  parent = r_style2  ).
+  r_format->set_attribute_ns( name = 'Bold'  prefix = 'ss'  value = '1' ).
+* Style for Data1
+  r_style1  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style1->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Data1' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style1  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E2EFDA' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style1 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+* Style for Data2
+  r_style3  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style3->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Data2' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style3  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E7E6E6' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style3 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+* Style for Date1
+  r_style4  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style4->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Date1' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style4  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E2EFDA' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style4 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+  r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style4  ).
+  r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = 'Short Date' ).
+
+* Style for Date2
+  r_style5  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style5->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Date2' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style5  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E7E6E6' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style5 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+  r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style5  ).
+  r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = 'Short Date' ).
+
+* Style for Time1
+  r_style6  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style6->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Time1' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style6  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E2EFDA' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style6 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+  r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style6  ).
+  r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = '[h]:mm:ss;@' ).
+
+* Style for Time2
+  r_style7  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+  r_style7->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = 'Time2' ).
+  r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style7  ).
+  r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E7E6E6' ).
+  r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+  r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style7 ).
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+  r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+  r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+  r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+  r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+  r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style7  ).
+  r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = '[h]:mm:ss;@' ).
+
+* Worksheet
+  r_worksheet = l_document->create_simple_element( name = 'Worksheet'  parent = l_element_root ).
+  r_worksheet->set_attribute_ns( name = 'Name'  prefix = 'ss'  value = 'Sheet1' ).
+*--Autofilter
+*  r_autofilter = l_document->create_simple_element( name = 'AutoFilter'  parent = r_worksheet ).
+*  r_autofilter->set_attribute_ns( name = 'Range'  prefix = 'x'  value = 'R3C1:R3C5' ).
+* Table
+  r_table = l_document->create_simple_element( name = 'Table'  parent = r_worksheet ).
+  r_table->set_attribute_ns( name = 'FullColumns'  prefix = 'x'  value = '1' ).
+  r_table->set_attribute_ns( name = 'FullRows'     prefix = 'x'  value = '1' ).
+
+*---Get the data details
+  lo_tab ?= cl_abap_typedescr=>describe_by_data( lt_data ).
+  lo_ref ?= lo_tab->get_table_line_type( ).
+* Column Formatting
+  LOOP AT lt_fcat ASSIGNING <fs_fcat> WHERE tech = space AND no_out = space.
+    CLEAR: lv_len.
+    IF <fs_fcat>-coltext IS NOT INITIAL.
+      lv_len = STRLEN( <fs_fcat>-coltext ).
+    ELSEIF <fs_fcat>-scrtext_m IS NOT INITIAL.
+      lv_len = STRLEN( <fs_fcat>-scrtext_m ).
+    ELSEIF <fs_fcat>-scrtext_l IS NOT INITIAL.
+      lv_len = STRLEN( <fs_fcat>-scrtext_l ).
+    ELSE.
+      lv_len = STRLEN( <fs_fcat>-fieldname ).
+    ENDIF.
+    READ TABLE lo_ref->components ASSIGNING <fs_comp> WITH KEY name = <fs_fcat>-fieldname.
+    IF sy-subrc EQ 0.
+      CLEAR: lv_value.
+      lv_value = TRUNC( <fs_comp>-length ).
+      IF lv_len > lv_value.
+        lv_value = lv_len.
+      ENDIF.
+      IF lv_value <= 3.
+        lv_value = TRUNC( lv_value * 8 ).
+      ELSE.
+        lv_value = TRUNC( lv_value * 8 ).
+      ENDIF.
+      CONDENSE lv_value.
+* Column Formatting
+      r_column = l_document->create_simple_element( name = 'Column'  parent = r_table ).
+      r_column->set_attribute_ns( name = 'Width'  prefix = 'ss'  value = lv_value ).
+*---Create style for Numeric Types
+      IF <fs_comp>-type_kind = 'P' OR <fs_comp>-type_kind = 'F' OR <fs_comp>-type_kind = 'I'.
+* Style for Quan1
+        CLEAR: lv_value.
+        CONCATENATE <fs_fcat>-fieldname '1' INTO lv_value.
+
+        r_style8  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+        r_style8->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = lv_value ).
+        r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style8  ).
+        r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E2EFDA' ).
+        r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+        r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style8 ).
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+        r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style8  ).
+        CLEAR: lv_value.
+        IF <fs_comp>-decimals > 0.
+          lv_value = '0.'.
+          DO <fs_comp>-decimals TIMES.
+            CONCATENATE lv_value '0' INTO lv_value.
+          ENDDO.
+        ELSE.
+          lv_value = ''.
+        ENDIF.
+        r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = lv_value ).
+
+* Style for Quan2
+        CLEAR: lv_value.
+        CONCATENATE <fs_fcat>-fieldname '2' INTO lv_value.
+        r_style9  = l_document->create_simple_element( name = 'Style'   parent = r_styles  ).
+        r_style9->set_attribute_ns( name = 'ID'  prefix = 'ss'  value = lv_value ).
+        r_format  = l_document->create_simple_element( name = 'Interior' parent = r_style9  ).
+        r_format->set_attribute_ns( name = 'Color'   prefix = 'ss'  value = '#E7E6E6' ).
+        r_format->set_attribute_ns( name = 'Pattern' prefix = 'ss'  value = 'Solid' ).
+
+        r_border  = l_document->create_simple_element( name = 'Borders'  parent = r_style9 ).
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Bottom' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Left' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Top' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+
+        r_format  = l_document->create_simple_element( name = 'Border'   parent = r_border  ).
+        r_format->set_attribute_ns( name = 'Position'  prefix = 'ss'  value = 'Right' ).
+        r_format->set_attribute_ns( name = 'LineStyle'  prefix = 'ss'  value = 'Continuous' ).
+        r_format->set_attribute_ns( name = 'Weight'  prefix = 'ss'  value = '1' ).
+        r_format  = l_document->create_simple_element( name = 'NumberFormat'   parent = r_style9  ).
+        CLEAR: lv_value.
+        IF <fs_comp>-decimals > 0.
+          lv_value = '0.'.
+          DO <fs_comp>-decimals TIMES.
+            CONCATENATE lv_value '0' INTO lv_value.
+          ENDDO.
+        ELSE.
+          lv_value = ''.
+        ENDIF.
+        r_format->set_attribute_ns( name = 'Format'  prefix = 'ss'  value = lv_value ).
+      ENDIF.
+    ENDIF.
+  ENDLOOP.
+*----Report Details
+  LOOP AT lt_head ASSIGNING <fs_head>.
+    CLEAR: lv_value.
+    CONCATENATE <fs_head>-key <fs_head>-info INTO lv_value SEPARATED BY space.
+    r_row = l_document->create_simple_element( name = 'Row'  parent = r_table ).
+    r_cell = l_document->create_simple_element( name = 'Cell'  parent = r_row ).
+    r_cell->set_attribute_ns( name = 'StyleID'  prefix = 'ss'  value = 'Some' ).
+    r_data = l_document->create_simple_element( name = 'Data'  value = lv_value  parent = r_cell ).
+    r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = 'String' ).
+  ENDLOOP.
+* Blank Row
+  r_row = l_document->create_simple_element( name = 'Row'  parent = r_table ).
+
+* Column Headers Row
+  r_row = l_document->create_simple_element( name = 'Row'  parent = r_table ).
+  r_row->set_attribute_ns( name = 'AutoFitHeight'  prefix = 'ss'  value = '1' ).
+
+*---Fill column header with data
+  LOOP AT lt_fcat ASSIGNING <fs_fcat> WHERE tech = space AND no_out = space.
+    CLEAR: lv_value.
+    IF <fs_fcat>-coltext IS NOT INITIAL.
+      lv_value = <fs_fcat>-coltext.
+    ELSEIF <fs_fcat>-scrtext_m IS NOT INITIAL.
+      lv_value = <fs_fcat>-scrtext_m.
+    ELSEIF <fs_fcat>-scrtext_l IS NOT INITIAL.
+      lv_value = <fs_fcat>-scrtext_l.
+    ELSE.
+      lv_value = <fs_fcat>-fieldname.
+    ENDIF.
+
+    r_cell = l_document->create_simple_element( name = 'Cell'  parent = r_row ).
+    r_cell->set_attribute_ns( name = 'StyleID'  prefix = 'ss'  value = 'Header' ).
+    r_data = l_document->create_simple_element( name = 'Data'  value = lv_value  parent = r_cell ).
+    r_ncell = l_document->create_simple_element( name = 'NamedCell'  parent = r_cell ).
+    r_ncell->set_attribute_ns( name = 'Name'  prefix = 'ss'  value = '_FilterDatabase' ).
+    r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = 'String' ).
+  ENDLOOP.
+
+* Data Table
+  LOOP AT lt_data ASSIGNING <fs_data>.
+    CLEAR: lv_value,
+           lv_res.
+    lv_res = sy-tabix MOD 2.
+    r_row = l_document->create_simple_element( name = 'Row'  parent = r_table ).
+    LOOP AT lt_fcat ASSIGNING <fs_fcat> WHERE tech = space AND no_out = space.
+      IF <lv_field> IS ASSIGNED.
+        UNASSIGN <lv_field>.
+      ENDIF.
+      IF lv_res = 0.
+        lv_value = 'Data2'.
+      ELSE.
+        lv_value = 'Data1'.
+      ENDIF.
+      ASSIGN COMPONENT <fs_fcat>-fieldname OF STRUCTURE <fs_data> TO <lv_field>.
+      IF sy-subrc EQ 0.
+        r_cell = l_document->create_simple_element( name = 'Cell'  parent = r_row ).
+        l_value = <lv_field>.
+        CONDENSE l_value NO-GAPS.
+*        WRITE <lv_field> TO l_val.
+*        l_value = l_val.
+        LOOP AT lo_ref->components ASSIGNING <fs_comp> WHERE name = <fs_fcat>-fieldname.
+
+        ENDLOOP.
+        IF sy-subrc EQ 0 AND <fs_comp>-type_kind = 'D'.
+          CLEAR: lv_date,
+                  l_date.
+          lv_date = <lv_field>.
+          CLEAR: l_value.
+          l_date = '0000-00-00T00:00:00.000'.
+          l_date(4) = lv_date(4).
+          l_date+5(2) = lv_date+4(2).
+          l_date+8(2) = lv_date+6(2).
+          l_value = l_date.
+          REPLACE FIRST OCCURRENCE OF 'Data' IN lv_value WITH 'Date'.
+        ELSEIF sy-subrc EQ 0 AND <fs_comp>-type_kind = 'T'.
+          CLEAR: lv_date,
+                l_date.
+          lv_date = <lv_field>.
+          CLEAR: l_value.
+          l_date = '1899-12-31T00:00:00.000'.
+          l_date+11(2) = lv_date(2).
+          l_date+14(2) = lv_date+2(2).
+          l_date+17(2) = lv_date+4(2).
+          l_value = l_date.
+          REPLACE FIRST OCCURRENCE OF 'Data' IN lv_value WITH 'Time'.
+        ELSEIF sy-subrc EQ 0 AND ( <fs_comp>-type_kind = 'P' OR <fs_comp>-type_kind = 'F' OR <fs_comp>-type_kind = 'I' ).
+          REPLACE FIRST OCCURRENCE OF 'Data' IN lv_value WITH <fs_fcat>-fieldname.
+        ENDIF.
+        r_cell->set_attribute_ns( name = 'StyleID'  prefix = 'ss'  value = lv_value ).
+        r_data = l_document->create_simple_element( name = 'Data'  value = l_value   parent = r_cell ).           " Data
+        READ TABLE lo_ref->components ASSIGNING <fs_comp> WITH KEY name = <fs_fcat>-fieldname.
+        IF sy-subrc EQ 0.
+          CLEAR: lv_value1.
+          IF  <fs_comp>-type_kind = 'C'.
+            lv_value1 = 'String'.
+          ELSEIF <fs_comp>-type_kind = 'D' OR <fs_comp>-type_kind = 'T'.
+            lv_value1 = 'DateTime'.
+          ELSEIF <fs_comp>-type_kind = 'P' OR <fs_comp>-type_kind = 'F' OR <fs_comp>-type_kind = 'I'.
+            lv_value1 = 'Number'.
+          ELSE.
+            lv_value1 = 'String'.
+          ENDIF.
+          r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = lv_value1 ).
+        ELSE.
+          r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = 'String' ).
+        ENDIF.
+      ENDIF.
+    ENDLOOP.
+  ENDLOOP.
+
+* Creating a Stream Factory
+  l_streamfactory = l_ixml->create_stream_factory( ).
+
+* Connect Internal XML Table to Stream Factory
+  l_ostream = l_streamfactory->create_ostream_itable( table = l_xml_table ).
+
+* Rendering the Document
+  l_renderer = l_ixml->create_renderer( ostream  = l_ostream  document = l_document ).
+  l_rc = l_renderer->render( ).
+
+* Saving the XML Document
+  l_xml_size = l_ostream->get_num_written_raw( ).
+* Creation of the Document Attachment
+  LOOP AT l_xml_table INTO wa_xml.
+    CLEAR ls_solix.
+    ls_solix-line = wa_xml-data.
+    APPEND ls_solix TO lt_solix.
+  ENDLOOP.
+
+  lv_size = LINES( lt_solix ) * 255.
+ENDMETHOD.
+
+METHOD send_email .
+  DATA:  send_request   TYPE REF TO cl_bcs,
+         document       TYPE REF TO cl_document_bcs,
+         recipient      TYPE REF TO if_recipient_bcs,
+         sender         TYPE REF TO cl_cam_address_bcs,
+         sender1        TYPE REF TO cl_sapuser_bcs,
+         bcs_exception  TYPE REF TO cx_bcs,
+         sent_to_all    TYPE os_boolean,
+         int_address    TYPE adr6-smtp_addr,
+         lt_solix       TYPE solix_tab,
+         lt_text        TYPE soli_tab,
+         ls_text        TYPE soli,
+         lv_size        TYPE int4,
+         lv_asize       TYPE sood-objlen.
+
+  FIELD-SYMBOLS: <fs_email> TYPE zty_s_email.
+
+*--Get Formatted excel data
+  me->format_xl( EXPORTING lt_head = lt_head lt_fcat = lt_fcat lt_data = lt_data CHANGING lt_solix = lt_solix lv_size = lv_size ).
+  lv_asize = lv_size.
+  TRY.
+*     -------- create persistent send request ------------------------
+      send_request = cl_bcs=>create_persistent( ).
+* Mail Contents
+      ls_text-line = 'Dear User,'.
+      APPEND ls_text TO lt_text.
+
+      CONCATENATE 'PFA..Report for ' i_subject INTO ls_text-line SEPARATED BY space.              " Mail Contents
+      APPEND ls_text TO lt_text.
+
+
+      ls_text-line = 'Thanks & Regards,'.
+      APPEND ls_text TO lt_text.
+
+      ls_text-line = 'SAP Support Team'.
+      APPEND ls_text TO lt_text.
+*--create document object
+      TRY.
+          document = cl_document_bcs=>create_document(
+                          i_type    = 'RAW'
+                          i_text    = lt_text
+                          i_subject =  i_subject ).         "#EC NOTEXT
+        CATCH cx_document_bcs INTO bcs_exception.
+      ENDTRY.
+*--create attachment
+      TRY.
+
+          IF lt_solix IS NOT INITIAL.
+            CALL METHOD document->add_attachment
+              EXPORTING
+                i_attachment_type    = 'XLS'
+                i_attachment_subject = i_attachment_subject
+                i_attachment_size    = lv_asize
+                i_att_content_hex    = lt_solix.
+          ENDIF.
+        CATCH cx_document_bcs INTO bcs_exception.
+      ENDTRY.
+*     add document to send request
+      TRY.
+          CALL METHOD send_request->set_document( document ).
+        CATCH cx_send_req_bcs.
+      ENDTRY.
+*---add recipents
+      LOOP AT i_recipents ASSIGNING <fs_email>.
+        int_address = <fs_email>-low.
+        TRY.
+*     create recipient object
+            recipient = cl_cam_address_bcs=>create_internet_address( int_address ).
+*     add recipient object to send request
+            send_request->add_recipient( recipient ).
+          CATCH cx_address_bcs INTO bcs_exception.
+        ENDTRY.
+
+      ENDLOOP.
+*---add sender
+      IF i_sender IS SUPPLIED.
+        int_address = i_sender.
+        TRY.
+            sender = cl_cam_address_bcs=>create_internet_address( int_address ).
+          CATCH cx_address_bcs INTO bcs_exception.
+        ENDTRY.
+        TRY.
+            CALL METHOD send_request->set_sender
+              EXPORTING
+                i_sender = sender.
+          CATCH cx_send_req_bcs INTO bcs_exception.
+        ENDTRY.
+      ELSE.
+        TRY.
+            sender1 = cl_sapuser_bcs=>create( sy-uname ).
+          CATCH cx_address_bcs INTO bcs_exception.
+        ENDTRY.
+        TRY.
+            CALL METHOD send_request->set_sender
+              EXPORTING
+                i_sender = sender1.
+          CATCH cx_send_req_bcs INTO bcs_exception.
+        ENDTRY.
+      ENDIF.
+*--add long subject
+      IF ip_subject IS SUPPLIED.
+        TRY.
+            CALL METHOD send_request->set_message_subject
+              EXPORTING
+                ip_subject = ip_subject.
+          CATCH cx_send_req_bcs .
+        ENDTRY.
+      ENDIF.
+*     ---------- send document ---------------------------------------
+      send_request->send_request->set_link_to_outbox( abap_true ).
+      sent_to_all = send_request->send( i_with_error_screen = abap_false ).
+      IF sent_to_all = abap_true.
+        e_sent = 0.
+      ELSE.
+        e_sent = 1.
+      ENDIF.
+    CATCH cx_send_req_bcs INTO bcs_exception.
+  ENDTRY.
+ENDMETHOD.
+
+ENDCLASS.
+
