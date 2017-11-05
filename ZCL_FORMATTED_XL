@@ -28,7 +28,7 @@ PUBLIC SECTION.
       value(lt_data) TYPE ANY TABLE
       value(i_subject) TYPE so_obj_des
       value(ip_subject) TYPE string OPTIONAL
-      value(i_recipents) TYPE zty_t_email
+      value(i_recipents) TYPE /sapsll/ad_smtpadr_r_t
       value(i_sender) TYPE ad_smtpadr OPTIONAL
       value(i_attachment_subject) TYPE so_obj_des OPTIONAL
     EXPORTING
@@ -37,9 +37,9 @@ ENDCLASS.
 CLASS zcl_formatted_xl IMPLEMENTATION.
 
 METHOD format_xl .
-  TYPES: BEGIN OF xml_line,
-          data(255) TYPE x,
-         END OF xml_line.
+TYPES: BEGIN OF xml_line,
+              data(255) TYPE x,
+             END OF xml_line.
 *---Data Declation
   DATA: l_ixml                TYPE REF TO if_ixml,
         l_streamfactory       TYPE REF TO if_ixml_stream_factory,
@@ -81,8 +81,8 @@ METHOD format_xl .
         l_xml_table           TYPE TABLE OF xml_line,
         wa_xml                TYPE xml_line,
         ls_solix              TYPE solix,
-        l_xml_size            TYPE i,                     "#EC NEEDED
-        l_rc                  TYPE i.                     "#EC NEEDED
+        l_xml_size            TYPE i,                       "#EC NEEDED
+        l_rc                  TYPE i.                       "#EC NEEDED
 
   FIELD-SYMBOLS: <fs_fcat>    TYPE lvc_s_fcat,
                  <fs_data>    TYPE ANY,
@@ -547,22 +547,24 @@ METHOD format_xl .
           REPLACE FIRST OCCURRENCE OF 'Data' IN lv_value WITH <fs_fcat>-fieldname.
         ENDIF.
         r_cell->set_attribute_ns( name = 'StyleID'  prefix = 'ss'  value = lv_value ).
-        r_data = l_document->create_simple_element( name = 'Data'  value = l_value   parent = r_cell ).           " Data
-        READ TABLE lo_ref->components ASSIGNING <fs_comp> WITH KEY name = <fs_fcat>-fieldname.
-        IF sy-subrc EQ 0.
-          CLEAR: lv_value1.
-          IF  <fs_comp>-type_kind = 'C'.
-            lv_value1 = 'String'.
-          ELSEIF <fs_comp>-type_kind = 'D' OR <fs_comp>-type_kind = 'T'.
-            lv_value1 = 'DateTime'.
-          ELSEIF <fs_comp>-type_kind = 'P' OR <fs_comp>-type_kind = 'F' OR <fs_comp>-type_kind = 'I'.
-            lv_value1 = 'Number'.
+        IF l_value NE '0000-00-00T00:00:00.000' AND l_value NE '    -  -  T00:00:00.000'. "Added correction for initial date and time
+          r_data = l_document->create_simple_element( name = 'Data'  value = l_value   parent = r_cell ).           " Data
+          READ TABLE lo_ref->components ASSIGNING <fs_comp> WITH KEY name = <fs_fcat>-fieldname.
+          IF sy-subrc EQ 0.
+            CLEAR: lv_value1.
+            IF  <fs_comp>-type_kind = 'C'.
+              lv_value1 = 'String'.
+            ELSEIF <fs_comp>-type_kind = 'D' OR <fs_comp>-type_kind = 'T'.
+              lv_value1 = 'DateTime'.
+            ELSEIF <fs_comp>-type_kind = 'P' OR <fs_comp>-type_kind = 'F' OR <fs_comp>-type_kind = 'I'.
+              lv_value1 = 'Number'.
+            ELSE.
+              lv_value1 = 'String'.
+            ENDIF.
+            r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = lv_value1 ).
           ELSE.
-            lv_value1 = 'String'.
+            r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = 'String' ).
           ENDIF.
-          r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = lv_value1 ).
-        ELSE.
-          r_data->set_attribute_ns( name = 'Type'  prefix = 'ss' value = 'String' ).
         ENDIF.
       ENDIF.
     ENDLOOP.
@@ -586,7 +588,19 @@ METHOD format_xl .
     ls_solix-line = wa_xml-data.
     APPEND ls_solix TO lt_solix.
   ENDLOOP.
-
+*---additional code
+*  DATA : xml TYPE xstring.
+*  CALL FUNCTION 'SDIXML_DOM_TO_XML'
+*    EXPORTING
+*      document      = l_document
+*    IMPORTING
+*      xml_as_string = xml.
+*  CALL FUNCTION 'BIZC_UI_XML_DISPLAY'
+*   EXPORTING
+*     ip_xml        = xml
+**     IP_DOM        =
+*.
+*---
   lv_size = LINES( lt_solix ) * 255.
 ENDMETHOD.
 
@@ -605,7 +619,7 @@ METHOD send_email .
          lv_size        TYPE int4,
          lv_asize       TYPE sood-objlen.
 
-  FIELD-SYMBOLS: <fs_email> TYPE zty_s_email.
+  FIELD-SYMBOLS: <fs_email> TYPE /sapsll/ad_smtpadr_r_s.
 
 *--Get Formatted excel data
   me->format_xl( EXPORTING lt_head = lt_head lt_fcat = lt_fcat lt_data = lt_data CHANGING lt_solix = lt_solix lv_size = lv_size ).
